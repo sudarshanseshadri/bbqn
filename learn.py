@@ -8,10 +8,12 @@ import random
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
+import seaborn as sns
 from collections import namedtuple, defaultdict
 from itertools import count
 from copy import deepcopy
 from time import time
+import argparse
 
 import torch
 import torch.nn as nn
@@ -19,6 +21,7 @@ import torch.optim as optim
 import torch.nn.functional as F
 from torch.autograd import Variable
 from models import *
+from config import Config
 
 # if gpu is to be used
 use_cuda = torch.cuda.is_available()
@@ -26,34 +29,6 @@ FloatTensor = torch.cuda.FloatTensor if use_cuda else torch.FloatTensor
 LongTensor = torch.cuda.LongTensor if use_cuda else torch.LongTensor
 ByteTensor = torch.cuda.ByteTensor if use_cuda else torch.ByteTensor
 Tensor = FloatTensor
-
-class Config():
-    env_name = 'gym_onehotgrid-v0'
-    gamma = 0.999
-    max_ep_len = 50
-    replay_mem_size = 2**18
-
-    num_episodes = 5000
-    linear_decay = False
-    train_in_epochs = True
-    if train_in_epochs:
-        num_target_reset = 2
-        period_train_in_epochs = 50
-        num_epochs = 2
-        batch_size = 256
-        period_sample = 5
-        ep_start = 1.0
-        ep_end = 0.01
-        ep_decay = 500
-    else:
-        period_target_reset = 5000
-        batch_size = 32
-        period_sample = 1
-        ep_start = 1.0
-        ep_end = 0.01
-        ep_decay = 500
-    assert ep_start >= ep_end
-
 
 ######################################################################
 # Replay Memory
@@ -94,9 +69,6 @@ class ReplayMemory(object):
     def sample(self, batch_size):
         return random.sample(self.memory, batch_size)
 
-    def shuffle(self):
-        random.shuffle(self.memory)
-
     def state_action_counts(self):
         freqs = defaultdict(lambda: defaultdict(int))
         for transition in self.memory:
@@ -109,16 +81,14 @@ class ReplayMemory(object):
     def __len__(self):
         return len(self.memory)
 
-steps_done = 0
 effective_eps = 0.0 #for printing purposes
-def select_action(env, model, state):
+def select_action(env, model, state, steps_done):
     if model.variational():
         var = Variable(state, volatile=True).type(FloatTensor) 
         q_sa = model(var).data
         best_action = q_sa.max(1)[1]
         return LongTensor([best_action[0]]).view(1, 1)
     
-    global steps_done
     sample = random.random()
     def calc_ep(start, end, decay, t):
         if config.linear_decay:
@@ -128,38 +98,12 @@ def select_action(env, model, state):
 
     eps_threshold = calc_ep(config.ep_start, config.ep_end, config.ep_decay, steps_done)
     
-    steps_done += 1
     global effective_eps
     effective_eps = eps_threshold
     if sample > eps_threshold:
         return model(Variable(state, volatile=True).type(FloatTensor)).data.max(1)[1].view(1, 1)
     else:
         return LongTensor([[random.randrange(env.num_actions())]])
-
-def get_Q(model, state):
-    var = Variable(state, volatile=True).type(FloatTensor)
-    if model.variational():
-        return model(var, mean_only=True).data
-    else:
-        return model(var).data
-
-def Q_values(env, model):
-    n = env.state_size()
-    m = int(n ** 0.5)
-    states = np.identity(n)
-    Q = torch.zeros(n, env.num_actions())
-    for i, row in enumerate(states):
-        state = Tensor(row).unsqueeze(0)
-        Q[i] = get_Q(model, state)[0]
-    return Q
-
-def Q_dump(env, model):
-    n = env.state_size()
-    m = int(n ** 0.5)
-    Q = Q_values(env, model)
-    for i, row in enumerate(Q.t()):
-        print "Action {}".format(i)
-        print row.contiguous().view(m, m)
 
 def simulate(model, env, config):
     
@@ -235,12 +179,12 @@ def simulate(model, env, config):
             M = len(memory) / config.batch_size
             for target_iter in range(config.num_target_reset):
                 model.save_target()
-                memory.shuffle()
                 for epoch in range(config.num_epochs):           
                     for minibatch in range(M):
-                        start_idx = minibatch * config.batch_size
-                        end_idx = start_idx + config.batch_size
-                        transitions = memory.memory[start_idx:end_idx]
+                        # start_idx = minibatch * config.batch_size
+                        # end_idx = start_idx + config.batch_size
+                        # transitions = memory.memory[start_idx:end_idx]
+                        transitions = memory.sample(config.batch_size)
                         if model.variational():
                             w_sample = model.sample()
                         optimizer_step(transitions)
@@ -251,13 +195,21 @@ def simulate(model, env, config):
             last_sync[0] += 1
             transitions = memory.sample(config.batch_size)
             M = 1
+            if model.variational():
+                w_sample = model.sample()
             optimizer_step(transitions)
     
+    time_list = []
+    value_list = []
     score_list = []
-    for i_episode in range(config.num_episodes):
+
+    start_time = time()
+    i_episode = 0
+    steps_done = 0
+
+    while time() - start_time < config.train_time_seconds:
         # Initialize the environment and state
         env.reset()
-       
         state = Tensor(env.get_state()).unsqueeze(0)
         iters = 0
         score = 0
@@ -270,7 +222,8 @@ def simulate(model, env, config):
             iters += 1
             
             # Select and perform an action
-            action = select_action(env, model, state)
+            action = select_action(env, model, state, steps_done)
+            steps_done += 1
             next_state, reward, done, _ = env.step(action[0, 0])
             next_state = Tensor(next_state).unsqueeze(0)
             score += reward
@@ -288,34 +241,126 @@ def simulate(model, env, config):
             if done:
                 break
 
-        score_list.append(score)
-        if model.variational():
-            for idx, sigma in enumerate(model.get_sigma_l()):
-                average = sigma.mean().data[0]
-                sigma_average_dict[components[idx]].append(average)
+
+        # if model.variational():
+        #     for idx, sigma in enumerate(model.get_sigma_l()):
+        #         average = sigma.mean().data[0]
+        #         sigma_average_dict[components[idx]].append(average)
         if i_episode % 100 == 0:
             if model.variational():
                 print "Episode: {}\tscore: {}".format(i_episode, score)
             else:
                 print "Episode: {}\tscore: {}\tepsilon: {}".format(i_episode, score, effective_eps)
+
+        value = start_state_value(env, model)
+        elapsed = time() - start_time
+
+        time_list.append(elapsed)
+        value_list.append(value)
+        score_list.append(score)
+
         if config.train_in_epochs and i_episode % config.period_train_in_epochs == 0:
             optimize_model(model)
+        i_episode += 1
 
     print memory.state_action_counts()
     Q_dump(env, model)
-    return loss_list, score_list, sigma_average_dict['W']
+    return loss_list, score_list, time_list, value_list, sigma_average_dict['W']
+
+#Debug/display helper functions
+def get_Q(model, state):
+    var = Variable(state, volatile=True).type(FloatTensor)
+    if model.variational():
+        if model.target is not None:
+            return model.target_q(var).data
+        return model(var, mean_only=True).data
+    else:
+        return model(var).data
+
+def Q_values(env, model):
+    n = env.state_size()
+    m = int(n ** 0.5)
+    states = np.identity(n)
+    Q = torch.zeros(n, env.num_actions())
+    for i, row in enumerate(states):
+        state = Tensor(row).unsqueeze(0)
+        Q[i] = get_Q(model, state)[0]
+    return Q
+
+def start_state_value(env, model):
+    start = Tensor(env.get_start_state()).unsqueeze(0)
+    Q  = get_Q(model, start)
+    return torch.max(Q)
+
+def Q_dump(env, model):
+    n = env.state_size()
+    m = int(n ** 0.5)
+    Q = Q_values(env, model)
+    for i, row in enumerate(Q.t()):
+        print "Action {}".format(i)
+        print row.contiguous().view(m, m)
+
+#### MAIN ####
+random.seed()
 
 ### Hyperparameters
-RHO_P = 0.0
+RHO_P = 5.0
 STD_DEV_P = math.log1p(math.exp(RHO_P))
 ###
 config = Config()
 
 env = gym.make(config.env_name).unwrapped
 models = []
-models.append(Linear_DQN(env.state_size(), env.num_actions()))
-models.append(Linear_BBQN(env.state_size(), env.num_actions(), RHO_P, bias=False))
-models.append(Linear_Double_DQN(env.state_size(), env.num_actions()))
 
-for model in models:
-    loss_average, score, sigma_average = simulate(model, env, config)
+models.append(lambda: ("DQN", Linear_DQN(env.state_size(), env.num_actions())))
+models.append(lambda: ("Double DQN", Linear_Double_DQN(env.state_size(), env.num_actions())))
+models.append(lambda: ("BBQN", Linear_BBQN(env.state_size(), env.num_actions(), RHO_P, bias=False)))
+models.append(lambda: ("Heavy BBQN", Heavy_BBQN(env.state_size(), env.num_actions(), RHO_P, bias=False)))
+
+color_dict = {"DQN":'red', "Double DQN":"green", "BBQN":"blue", "Heavy BBQN":"yellow"}
+
+plt.figure(1)
+time_step = 0.2
+time_bins = np.arange(0.0, config.train_time_seconds+time_step, time_step)
+y = [3.0 for _ in time_bins]
+plt.plot(y, linestyle='dashed', label="Optimal", color='k')
+
+longest_episodes = 0
+for index, constructor in enumerate(models):
+    time_data_plot = []
+    episodes_data_plot = []
+    for trial in range(config.num_trials):
+        name, model = constructor()
+        loss_average, score_list, time_list, value_list, sigma_average = simulate(model, env, config)
+        episodes_data_plot.append(value_list)
+        interpolated_values = np.interp(time_bins, time_list, value_list)
+        time_data_plot.append(list(interpolated_values))
+
+    min_len = min([len(data) for data in episodes_data_plot])
+    longest_episodes = max(longest_episodes, min_len)
+    episodes_data_plot = [data[:min_len] for data in episodes_data_plot]
+    plt.figure(1)        
+    sns.tsplot(data=time_data_plot, time=time_bins, condition=name, legend=True, color=color_dict)
+    plt.figure(2)
+    sns.tsplot(data=episodes_data_plot, condition=name, legend=True, color=color_dict)
+
+plt.figure(2)
+y = [3.0 for _ in range(longest_episodes)]
+plt.plot(y, linestyle='dashed', label="Optimal", color='k')
+
+folder_name = "./results/simple_5x5/"
+# folder_name = "./results/complex_5x5/"
+
+plt.figure(1)
+plt.title("Comparison of training times when sampling is expensive")
+plt.xlabel("Training time (seconds)")
+plt.ylabel("Value of start state")
+# plt.savefig(folder_name+"dqn_bbqn_time.png")
+
+plt.figure(2)
+plt.title("Comparison of training effectiveness")
+plt.xlabel("Number of episodes")
+plt.ylabel("Value of start state")
+# plt.savefig(folder_name+"/dqn_bbqn_episodes.png")
+
+plt.show()
