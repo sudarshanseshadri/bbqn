@@ -4,12 +4,14 @@ import torch
 import torch.nn as nn
 from models.Variational_Linear_Layer import Variational_Linear_Layer
 
+
 #same as torch.nn.Linear, but no initialization
 class Linear_Zero_Init(nn.Linear):
     def reset_parameters(self):
         self.weight.data.fill_(0.0)
         if self.bias is not None:
             self.bias.data.fill_(0.0)
+
 
 class Linear_DQN(nn.Module):
     def __init__(self, num_features, num_outputs):
@@ -24,22 +26,29 @@ class Linear_DQN(nn.Module):
         return self.head(x.view(x.size(0), -1))
 
     def save_target(self):
-    	self.target = deepcopy(self.head)
+        self.target = deepcopy(self.head)
 
-    def target_value(self, rewards, gamma, states):
-    	assert self.target is not None, "Must call save_target at least once before calculating target_value"
+    def target_value(self, rewards, gamma, states, not_done_mask=None):
+        assert self.target is not None, \
+            "Must call save_target at least once before calculating target_value!"
         q_s = self.target(states.view(states.size(0), -1))
         q_sa = q_s.max(1)[0]
-        return rewards + gamma * q_sa
+        if not_done_mask is not None:
+            return rewards + (gamma * not_done_mask * q_sa)
+        else:
+            return rewards + gamma * q_sa
 
+
+# todo: changing the target value function might have broken the other linear models
 class Linear_Double_DQN(Linear_DQN):
     def target_value(self, rewards, gamma, states):
-    	assert self.target is not None, "Must call save_target at least once before calculating target_value"
+        assert self.target is not None, "Must call save_target at least once before calculating target_value"
         q_s = self.head(states.view(states.size(0), -1))
         actions = q_s.max(1)[1].view(-1, 1)
         q_s = self.target(states.view(states.size(0), -1))
         q_sa = q_s.gather(1, actions).view(-1)
         return rewards + gamma * q_sa
+
 
 class Linear_BBQN():
     def __init__(self, num_features, num_actions, rho, bias=True):
@@ -106,6 +115,7 @@ class Linear_BBQN():
 
     def __call__(self, x, mean_only=False):
         return self.forward(x, mean_only)
+
 
 class Heavy_BBQN(Linear_BBQN):
     def sample(self):

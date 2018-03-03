@@ -148,11 +148,11 @@ def simulate(model, env, config):
                 #     w_sample = model.sample()
                 do_update = not config.train_in_epochs
             iters += 1
-            ##############################################
+
             # this stores the state in the replay buffer as a numpy array or (9,)
             idx = memory.store_frame(state)
             q_input = Tensor(memory.encode_recent_observation()).unsqueeze(0)
-            ##############################################
+
             # Select and perform an action
             action = select_action(env, model, q_input, steps_done)
             steps_done += 1
@@ -208,7 +208,6 @@ def get_Q(model, state):
 
 def Q_values(env, model):
     n = env.state_size()
-    m = int(n ** 0.5)
     states = np.identity(n)
     Q = torch.zeros(n, env.num_actions())
     for i, row in enumerate(states):
@@ -248,9 +247,6 @@ env = gym.make(config.env_name).unwrapped
 models = []
 
 models.append(lambda: ("DQN", Linear_DQN(env.state_size(), env.num_actions())))
-# models.append(lambda: ("Double DQN", Linear_Double_DQN(env.state_size(), env.num_actions())))
-# models.append(lambda: ("BBQN", Linear_BBQN(env.state_size(), env.num_actions(), RHO_P, bias=False)))
-# models.append(lambda: ("Heavy BBQN", Heavy_BBQN(env.state_size(), env.num_actions(), RHO_P, bias=False)))
 
 color_dict = {"DQN": 'red', "Double DQN": "green", "BBQN": "blue", "Heavy BBQN": "yellow"}
 
@@ -258,49 +254,3 @@ for i, constructor in enumerate(models):
     name, model = constructor()
     loss_average, score_list, time_list, value_list, sigma_average = simulate(
         model, env, config)
-
-# plt.figure(1)
-# time_step = 0.2
-# time_bins = np.arange(0.0, config.train_time_seconds+time_step, time_step)
-# y = [3.0 for _ in time_bins]
-# plt.plot(y, linestyle='dashed', label="Optimal", color='k')
-
-# longest_episodes = 0
-# for index, constructor in enumerate(models):
-#     time_data_plot = []
-#     episodes_data_plot = []
-#     for trial in range(config.num_trials):
-#         name, model = constructor()
-#         loss_average, score_list, time_list, value_list, sigma_average = simulate(model, env, config)
-#         episodes_data_plot.append(value_list)
-#         interpolated_values = np.interp(time_bins, time_list, value_list)
-#         time_data_plot.append(list(interpolated_values))
-#
-#     min_len = min([len(data) for data in episodes_data_plot])
-#     longest_episodes = max(longest_episodes, min_len)
-#     episodes_data_plot = [data[:min_len] for data in episodes_data_plot]
-#     plt.figure(1)
-#     sns.tsplot(data=time_data_plot, time=time_bins, condition=name, legend=True, color=color_dict)
-#     plt.figure(2)
-#     sns.tsplot(data=episodes_data_plot, condition=name, legend=True, color=color_dict)
-
-# plt.figure(2)
-# y = [3.0 for _ in range(longest_episodes)]
-# plt.plot(y, linestyle='dashed', label="Optimal", color='k')
-#
-# folder_name = "./results/simple_5x5/"
-# # folder_name = "./results/complex_5x5/"
-#
-# plt.figure(1)
-# plt.title("Comparison of training times when sampling is expensive")
-# plt.xlabel("Training time (seconds)")
-# plt.ylabel("Value of start state")
-# # plt.savefig(folder_name+"dqn_bbqn_time.png")
-#
-# plt.figure(2)
-# plt.title("Comparison of training effectiveness")
-# plt.xlabel("Number of episodes")
-# plt.ylabel("Value of start state")
-# # plt.savefig(folder_name+"/dqn_bbqn_episodes.png")
-#
-# plt.show()
