@@ -1,13 +1,8 @@
-import math
-import random
-import numpy as np
 from copy import deepcopy
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from torch.autograd import Variable
-from Variational_Linear_Layer import Variational_Linear_Layer
+from models.Variational_Linear_Layer import Variational_Linear_Layer
 
 #same as torch.nn.Linear, but no initialization
 class Linear_Zero_Init(nn.Linear):

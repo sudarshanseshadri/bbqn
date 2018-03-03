@@ -6,6 +6,7 @@ class Config():
     replay_mem_size = 2**14
 
     train_time_seconds = 60
+    frame_history_len = 1  # change to 4 for pong
 
     linear_decay = False
     train_in_epochs = True

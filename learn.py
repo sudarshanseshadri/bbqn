@@ -1,27 +1,18 @@
 # -*- coding: utf-8 -*-
 
 import gym
-import gym_gridworld
 
 import math
 import random
 import numpy as np
-import matplotlib
-import matplotlib.pyplot as plt
-import seaborn as sns
 from collections import namedtuple, defaultdict
-from itertools import count
-from copy import deepcopy
 from time import time
-import argparse
 
-import torch
-import torch.nn as nn
 import torch.optim as optim
-import torch.nn.functional as F
 from torch.autograd import Variable
-from models import *
-from config import Config
+from models.linear_models import *
+from configs.grid_config import Config
+from utils.old_replay import ReplayMemory
 
 # if gpu is to be used
 use_cuda = torch.cuda.is_available()
@@ -31,55 +22,9 @@ ByteTensor = torch.cuda.ByteTensor if use_cuda else torch.ByteTensor
 Tensor = FloatTensor
 
 ######################################################################
-# Replay Memory
-# -------------
-#
-# We'll be using experience replay memory for training our DQN. It stores
-# the transitions that the agent observes, allowing us to reuse this data
-# later. By sampling from it randomly, the transitions that build up a
-# batch are decorrelated. It has been shown that this greatly stabilizes
-# and improves the DQN training procedure.
-#
-# For this, we're going to need two classses:
-#
-# -  ``Transition`` - a named tuple representing a single transition in
-#    our environment
-# -  ``ReplayMemory`` - a cyclic buffer of bounded size that holds the
-#    transitions observed recently. It also implements a ``.sample()``
-#    method for selecting a random batch of transitions for training.
-#
-
 Transition = namedtuple('Transition',
                         ('state', 'action', 'next_state', 'reward'))
 
-class ReplayMemory(object):
-
-    def __init__(self, capacity):
-        self.capacity = capacity
-        self.memory = []
-        self.position = 0
-
-    def push(self, *args):
-        """Saves a transition."""
-        if len(self.memory) < self.capacity:
-            self.memory.append(None)
-        self.memory[self.position] = Transition(*args)
-        self.position = (self.position + 1) % self.capacity
-
-    def sample(self, batch_size):
-        return random.sample(self.memory, batch_size)
-
-    def state_action_counts(self):
-        freqs = defaultdict(lambda: defaultdict(int))
-        for transition in self.memory:
-            state = transition.state[0].numpy()
-            state = np.argmax(state)
-            action = transition.action[0,0]
-            freqs[state][action] += 1
-        return freqs
-
-    def __len__(self):
-        return len(self.memory)
 
 effective_eps = 0.0 #for printing purposes
 def select_action(env, model, state, steps_done):
@@ -191,7 +136,7 @@ def simulate(model, env, config):
         else:
             if last_sync[0] % config.period_target_reset == 0:
                 model.save_target()
-                print "Target reset"
+                print("Target reset")
             last_sync[0] += 1
             transitions = memory.sample(config.batch_size)
             M = 1
@@ -248,9 +193,10 @@ def simulate(model, env, config):
         #         sigma_average_dict[components[idx]].append(average)
         if i_episode % 100 == 0:
             if model.variational():
-                print "Episode: {}\tscore: {}".format(i_episode, score)
+                print("Episode: {}\tscore: {}".format(i_episode, score))
             else:
-                print "Episode: {}\tscore: {}\tepsilon: {}".format(i_episode, score, effective_eps)
+                print("Episode: {}\tscore: {}\tepsilon: {}".format(i_episode, score,
+                                                                   effective_eps))
 
         value = start_state_value(env, model)
         elapsed = time() - start_time
@@ -297,11 +243,15 @@ def Q_dump(env, model):
     m = int(n ** 0.5)
     Q = Q_values(env, model)
     for i, row in enumerate(Q.t()):
-        print "Action {}".format(i)
-        print row.contiguous().view(m, m)
+        print("Action {}".format(i))
+        print(row.contiguous().view(m, m))
 
 #### MAIN ####
-random.seed()
+# todo: clean this up rip
+# set seeds
+torch.manual_seed(1234)
+np.random.seed(1234)
+random.seed(1234)
 
 ### Hyperparameters
 RHO_P = 5.0
@@ -313,54 +263,59 @@ env = gym.make(config.env_name).unwrapped
 models = []
 
 models.append(lambda: ("DQN", Linear_DQN(env.state_size(), env.num_actions())))
-models.append(lambda: ("Double DQN", Linear_Double_DQN(env.state_size(), env.num_actions())))
-models.append(lambda: ("BBQN", Linear_BBQN(env.state_size(), env.num_actions(), RHO_P, bias=False)))
-models.append(lambda: ("Heavy BBQN", Heavy_BBQN(env.state_size(), env.num_actions(), RHO_P, bias=False)))
-
+# models.append(lambda: ("Double DQN", Linear_Double_DQN(env.state_size(), env.num_actions())))
+# models.append(lambda: ("BBQN", Linear_BBQN(env.state_size(), env.num_actions(), RHO_P, bias=False)))
+# models.append(lambda: ("Heavy BBQN", Heavy_BBQN(env.state_size(), env.num_actions(), RHO_P, bias=False)))
+#
 color_dict = {"DQN":'red', "Double DQN":"green", "BBQN":"blue", "Heavy BBQN":"yellow"}
 
-plt.figure(1)
-time_step = 0.2
-time_bins = np.arange(0.0, config.train_time_seconds+time_step, time_step)
-y = [3.0 for _ in time_bins]
-plt.plot(y, linestyle='dashed', label="Optimal", color='k')
+for i, constructor in enumerate(models):
+    name, model = constructor()
+    loss_average, score_list, time_list, value_list, sigma_average = simulate(
+        model, env, config)
 
-longest_episodes = 0
-for index, constructor in enumerate(models):
-    time_data_plot = []
-    episodes_data_plot = []
-    for trial in range(config.num_trials):
-        name, model = constructor()
-        loss_average, score_list, time_list, value_list, sigma_average = simulate(model, env, config)
-        episodes_data_plot.append(value_list)
-        interpolated_values = np.interp(time_bins, time_list, value_list)
-        time_data_plot.append(list(interpolated_values))
-
-    min_len = min([len(data) for data in episodes_data_plot])
-    longest_episodes = max(longest_episodes, min_len)
-    episodes_data_plot = [data[:min_len] for data in episodes_data_plot]
-    plt.figure(1)        
-    sns.tsplot(data=time_data_plot, time=time_bins, condition=name, legend=True, color=color_dict)
-    plt.figure(2)
-    sns.tsplot(data=episodes_data_plot, condition=name, legend=True, color=color_dict)
-
-plt.figure(2)
-y = [3.0 for _ in range(longest_episodes)]
-plt.plot(y, linestyle='dashed', label="Optimal", color='k')
-
-folder_name = "./results/simple_5x5/"
-# folder_name = "./results/complex_5x5/"
-
-plt.figure(1)
-plt.title("Comparison of training times when sampling is expensive")
-plt.xlabel("Training time (seconds)")
-plt.ylabel("Value of start state")
-# plt.savefig(folder_name+"dqn_bbqn_time.png")
-
-plt.figure(2)
-plt.title("Comparison of training effectiveness")
-plt.xlabel("Number of episodes")
-plt.ylabel("Value of start state")
-# plt.savefig(folder_name+"/dqn_bbqn_episodes.png")
-
-plt.show()
+# plt.figure(1)
+# time_step = 0.2
+# time_bins = np.arange(0.0, config.train_time_seconds+time_step, time_step)
+# y = [3.0 for _ in time_bins]
+# plt.plot(y, linestyle='dashed', label="Optimal", color='k')
+#
+# longest_episodes = 0
+# for index, constructor in enumerate(models):
+#     time_data_plot = []
+#     episodes_data_plot = []
+#     for trial in range(config.num_trials):
+#         name, model = constructor()
+#         loss_average, score_list, time_list, value_list, sigma_average = simulate(model, env, config)
+#         episodes_data_plot.append(value_list)
+#         interpolated_values = np.interp(time_bins, time_list, value_list)
+#         time_data_plot.append(list(interpolated_values))
+#
+#     min_len = min([len(data) for data in episodes_data_plot])
+#     longest_episodes = max(longest_episodes, min_len)
+#     episodes_data_plot = [data[:min_len] for data in episodes_data_plot]
+#     plt.figure(1)
+#     sns.tsplot(data=time_data_plot, time=time_bins, condition=name, legend=True, color=color_dict)
+#     plt.figure(2)
+#     sns.tsplot(data=episodes_data_plot, condition=name, legend=True, color=color_dict)
+#
+# plt.figure(2)
+# y = [3.0 for _ in range(longest_episodes)]
+# plt.plot(y, linestyle='dashed', label="Optimal", color='k')
+#
+# folder_name = "./results/simple_5x5/"
+# # folder_name = "./results/complex_5x5/"
+#
+# plt.figure(1)
+# plt.title("Comparison of training times when sampling is expensive")
+# plt.xlabel("Training time (seconds)")
+# plt.ylabel("Value of start state")
+# # plt.savefig(folder_name+"dqn_bbqn_time.png")
+#
+# plt.figure(2)
+# plt.title("Comparison of training effectiveness")
+# plt.xlabel("Number of episodes")
+# plt.ylabel("Value of start state")
+# # plt.savefig(folder_name+"/dqn_bbqn_episodes.png")
+#
+# plt.show()
