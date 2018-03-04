@@ -118,7 +118,8 @@ class ReplayBuffer(object):
 
         # this checks if we are using low-dimensional observations, such as RAM
         # state, in which case we just directly return the latest RAM.
-        # todo: changed this from == 2 to <= 2
+
+        # changed this from == 2 to <= 2 to make it compatible with gridworld
         if len(self.obs.shape) <= 2:
             return self.obs[end_idx-1]
 

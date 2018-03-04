@@ -5,13 +5,12 @@ import gym_gridworld
 
 import math
 import random
-import numpy as np
 from collections import namedtuple, defaultdict
 from time import time
 
 import torch.optim as optim
-from torch.autograd import Variable
 from models.linear_models import *
+from utils.helpers import *
 from configs.grid_config import Config
 from utils.updated_replay import ReplayBuffer
 ######################################
@@ -26,7 +25,6 @@ Tensor = FloatTensor
 Transition = namedtuple('Transition',
                         ('state', 'action', 'reward', 'next_state', 'done'))
 
-#########################################################################################
 effective_eps = 0.0  # for printing purposes
 
 
@@ -57,8 +55,6 @@ def select_action(env, model, state, steps_done):
 
 
 #########################################################################################
-
-
 def simulate(model, env, config):
     optimizer = optim.Adam(model.parameters())
     memory = ReplayBuffer(config.replay_mem_size, config.frame_history_len)
@@ -74,6 +70,7 @@ def simulate(model, env, config):
 
         def loss_of_batch(batch):
             # convert numpy sampled items into Variable torch Tensors
+            # todo: will need to add mc_batch here later for MMC update
             state_batch = Variable(torch.from_numpy(batch[0]).type(FloatTensor))
             action_batch = Variable(torch.from_numpy(batch[1]).type(
                 LongTensor)).unsqueeze(1)
@@ -82,6 +79,15 @@ def simulate(model, env, config):
                                    volatile=True)
             not_done_mask = Variable(torch.from_numpy(1-batch[4]).type(FloatTensor),
                                      volatile=True)
+
+            # compute bonuses here if necessary
+            # if config.bonus:
+            #     states_visited = np.nonzero(state_batch.data.numpy())[1]
+            #     bonus_batch = config.beta/np.sqrt(memory.count_table[states_visited])
+            #     aug_reward = reward_batch.data.numpy() + bonus_batch
+            #     # clip rewards if necessary
+            #     # aug_reward = np.maximum(-1.0, np.minimum(aug_reward, 1.0))
+            #     rew_batch = Variable(FloatTensor(aug_reward))
 
             # Compute Q(s_t, a) - the model computes Q(s_t), then we select the
             # columns of actions taken
@@ -195,62 +201,23 @@ def simulate(model, env, config):
     return loss_list, score_list, time_list, value_list, sigma_average_dict['W']
 
 
-# Debug/display helper functions
-def get_Q(model, state):
-    var = Variable(state, volatile=True).type(FloatTensor)
-    if model.variational():
-        if model.target is not None:
-            return model.target_q(var).data
-        return model(var, mean_only=True).data
-    else:
-        return model(var).data
+if __name__ == '__main__':
+    # set seeds
+    torch.manual_seed(1234)
+    np.random.seed(1234)
+    random.seed(1234)
 
+    # grab config file
+    config = Config()
 
-def Q_values(env, model):
-    n = env.state_size()
-    states = np.identity(n)
-    Q = torch.zeros(n, env.num_actions())
-    for i, row in enumerate(states):
-        state = Tensor(row).unsqueeze(0)
-        Q[i] = get_Q(model, state)[0]
-    return Q
+    env = gym.make(config.env_name).unwrapped
+    models = []
 
+    models.append(lambda: ("DQN", Linear_DQN(env.state_size(), env.num_actions())))
 
-def start_state_value(env, model):
-    start = Tensor(env.get_start_state()).unsqueeze(0)
-    Q = get_Q(model, start)
-    return torch.max(Q)
+    color_dict = {"DQN": 'red', "Double DQN": "green", "BBQN": "blue", "Heavy BBQN": "yellow"}
 
-
-def Q_dump(env, model):
-    n = env.state_size()
-    m = int(n ** 0.5)
-    Q = Q_values(env, model)
-    for i, row in enumerate(Q.t()):
-        print("Action {}".format(i))
-        print(row.contiguous().view(m, m))
-
-
-#### MAIN ####
-# set seeds
-torch.manual_seed(1234)
-np.random.seed(1234)
-random.seed(1234)
-
-### Hyperparameters
-# RHO_P = 5.0
-# STD_DEV_P = math.log1p(math.exp(RHO_P))
-###
-config = Config()
-
-env = gym.make(config.env_name).unwrapped
-models = []
-
-models.append(lambda: ("DQN", Linear_DQN(env.state_size(), env.num_actions())))
-
-color_dict = {"DQN": 'red', "Double DQN": "green", "BBQN": "blue", "Heavy BBQN": "yellow"}
-
-for i, constructor in enumerate(models):
-    name, model = constructor()
-    loss_average, score_list, time_list, value_list, sigma_average = simulate(
-        model, env, config)
+    for i, constructor in enumerate(models):
+        name, model = constructor()
+        loss_average, score_list, time_list, value_list, sigma_average = simulate(
+            model, env, config)
