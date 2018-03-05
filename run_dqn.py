@@ -81,15 +81,16 @@ def main(config, env):
     :return:
     """
     # FLAGS = update_tf_wrapper_args(args, utils.tf_wrapper.FLAGS)
-    num_iterations = config.num_iterations
+    num_iterations = float(config.num_iterations) / 4.0
 
     # learning rate schedule
+    lr_multiplier = 1.0
     lr_schedule = PiecewiseSchedule([
-                                         (0,                   1e-4),
-                                         (num_iterations / 10, 1e-4),
-                                         (num_iterations / 2,  5e-5),
+                                         (0,                   1e-4 * lr_multiplier),
+                                         (num_iterations / 10, 1e-4 * lr_multiplier),
+                                         (num_iterations / 2,  5e-5 * lr_multiplier),
                                     ],
-                                    outside_value=5e-5)
+                                    outside_value=5e-5 * lr_multiplier)
     optimizer = OptimizerSpec(
         constructor=torch.optim.Adam,
         kwargs=dict(eps=1e-4),

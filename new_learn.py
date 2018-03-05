@@ -72,7 +72,12 @@ def atari_learn(env,
 
     # define Q network and target network (instantiate 2 DQN's)
     Q = q_func(in_channel, num_actions)
-    target_Q = deepcopy(Q)
+    target_Q = q_func(in_channel, num_actions)
+
+    # if GPU enabled
+    if USE_CUDA:
+        Q.cuda()
+        target_Q.cuda()
 
     ######
     # epsilon-greedy exploration
@@ -94,8 +99,8 @@ def atari_learn(env,
                 return LongTensor([[random.randrange(num_actions)]])
     ######
     # define optimizer
-    optimizer = torch.optim.Adam(Q.parameters(), lr=1e-4)
-    # optimizer_spec.constructor(Q.parameters(), **optimizer_spec.kwargs)
+    # optimizer = torch.optim.Adam(Q.parameters())
+    optimizer_spec.constructor(Q.parameters(), **optimizer_spec.kwargs)
 
     # construct the replay buffer
     replay_buffer = ReplayBuffer(config.replay_mem_size, config.frame_history_len)
@@ -151,7 +156,7 @@ def atari_learn(env,
                 FloatTensor) / 255.0)
             action_batch = Variable(torch.from_numpy(action_batch).type(
                 LongTensor))
-            reward_batch = Variable(torch.from_numpy(reward_batch))
+            reward_batch = Variable(torch.from_numpy(reward_batch).type(FloatTensor))
             next_state_batch = Variable(torch.from_numpy(next_state_batch).type(
                 FloatTensor) / 255.0, volatile=True)
             not_done_mask = Variable(torch.from_numpy(1 - done_mask).type(FloatTensor),

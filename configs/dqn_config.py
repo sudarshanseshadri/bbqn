@@ -17,16 +17,17 @@ class Config():
     clip_grad = True
 
     # model and train config
-    log_freq = 1000
+    log_freq = 10000
     # save_freq = 5000
     downsample = False  # specific to exploration bonus
 
     # todo: original hyperparameters; table this for now
     frame_history_len = 4
     replay_mem_size = 1000000
-    max_timesteps = 8000000  # 8M
+
+    max_timesteps = 40000000
+
     learning_starts = 50000
-    num_iterations = max_timesteps/2.0
     batch_size = 32
     target_update_freq = 10000
     gamma = 0.99
