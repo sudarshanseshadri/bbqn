@@ -16,7 +16,7 @@ import utils
 from utils.gym_atari_wrappers import get_env, get_wrapper_by_name
 from utils.schedule import LinearSchedule, PiecewiseSchedule
 from configs.dqn_config import Config
-from new_learn import OptimizerSpec
+from new_learn import OptimizerSpec, fake_learn
 
 # do logging
 logger = logging.getLogger(__name__)
@@ -80,46 +80,79 @@ def main(config, env):
     :return:
     """
     # FLAGS = update_tf_wrapper_args(args, utils.tf_wrapper.FLAGS)
-    num_iterations = float(config.max_timesteps) / 4.0
+    # num_iterations = float(config.max_timesteps) / 4.0
+    #
+    # # learning rate schedule
+    # lr_multiplier = 1.0
+    # lr_schedule = PiecewiseSchedule([
+    #                                      (0,                   1e-4 * lr_multiplier),
+    #                                      (num_iterations / 10, 1e-4 * lr_multiplier),
+    #                                      (num_iterations / 2,  5e-5 * lr_multiplier),
+    #                                 ],
+    #                                 outside_value=5e-5 * lr_multiplier)
+    # optimizer = OptimizerSpec(
+    #     constructor=torch.optim.Adam,
+    #     kwargs=dict(eps=1e-4),
+    #     lr_schedule=lr_schedule
+    # )
+    #
+    # # may need this for Atari
+    # def stopping_criterion(env, t):
+    #     # t := num steps of wrapped env // different from num steps in underlying env
+    #     return get_wrapper_by_name(env, "Monitor").get_total_steps() >= \
+    #            config.max_timesteps
+    #
+    # # decay schedule
+    # exploration_schedule = PiecewiseSchedule(
+    #     [
+    #         (0, 1.0),
+    #         (1e6, 0.1),
+    #         (num_iterations / 2, 0.01),
+    #     ], outside_value=0.01
+    # )
+    #
+    # # get model
+    # if config_file.deep:
+    #     dqn_agent = DQN
+    # else:
+    #     dqn_agent = Linear_DQN
+    #
+    # # train agent
+    # atari_learn(env, dqn_agent, config, optimizer, exploration_schedule,
+    #             stopping_criterion)
+    BATCH_SIZE = 32
+    GAMMA = 0.99
+    REPLAY_BUFFER_SIZE = 1000000
+    LEARNING_STARTS = 4
+    LEARNING_FREQ = 4
+    FRAME_HISTORY_LEN = 4
+    TARGET_UPDATE_FREQ = 4
+    LEARNING_RATE = 0.00025
+    EPS = 1e-2
+    BETA = 0.5
 
-    # learning rate schedule
-    lr_multiplier = 1.0
-    lr_schedule = PiecewiseSchedule([
-                                         (0,                   1e-4 * lr_multiplier),
-                                         (num_iterations / 10, 1e-4 * lr_multiplier),
-                                         (num_iterations / 2,  5e-5 * lr_multiplier),
-                                    ],
-                                    outside_value=5e-5 * lr_multiplier)
-    optimizer = OptimizerSpec(
-        constructor=torch.optim.Adam,
-        kwargs=dict(eps=1e-4),
-        lr_schedule=lr_schedule
-    )
+    # FLAGS = update_tf_wrapper_args(args, dqn_utils.tf_wrapper.FLAGS)
 
-    # may need this for Atari
     def stopping_criterion(env, t):
-        # t := num steps of wrapped env // different from num steps in underlying env
-        return get_wrapper_by_name(env, "Monitor").get_total_steps() >= \
-               config.max_timesteps
+        # t := number of steps of wrapped env
+        # different from number of steps in underlying env
+        return get_wrapper_by_name(env, "Monitor").get_total_steps() >= 40000000
 
-    # decay schedule
-    exploration_schedule = PiecewiseSchedule(
-        [
-            (0, 1.0),
-            (1e6, 0.1),
-            (num_iterations / 2, 0.01),
-        ], outside_value=0.01
+    optimizer_spec = OptimizerSpec(
+        constructor=torch.optim.Adam,
+        kwargs=dict(lr=LEARNING_RATE, eps=EPS),
     )
 
-    # get model
-    if config_file.deep:
-        dqn_agent = DQN
-    else:
-        dqn_agent = Linear_DQN
+    exploration_schedule = LinearSchedule(1000000, 0.1)
 
-    # train agent
-    atari_learn(env, dqn_agent, config, optimizer, exploration_schedule,
-                stopping_criterion)
+    fake_learn(
+        env=env, q_func=DQN, optimizer_spec=optimizer_spec,
+        exploration=exploration_schedule, stopping_criterion=stopping_criterion,
+        replay_buffer_size=REPLAY_BUFFER_SIZE, batch_size=BATCH_SIZE,
+        gamma=GAMMA, beta=BETA, learning_starts=LEARNING_STARTS,
+        learning_freq=LEARNING_FREQ, frame_history_len=FRAME_HISTORY_LEN,
+        target_update_freq=TARGET_UPDATE_FREQ
+    )
 
 
 if __name__ == '__main__':
