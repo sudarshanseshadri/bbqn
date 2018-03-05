@@ -51,7 +51,7 @@ class ReplayBuffer(object):
         self.reward   = None
         self.done     = None
 
-        self.count_table = np.zeros(10)
+        # self.count_table = np.zeros(10)
 
     def can_sample(self, batch_size):
         """Returns true if `batch_size` different transitions can be sampled from the buffer."""
@@ -164,8 +164,8 @@ class ReplayBuffer(object):
         self.obs[self.next_idx] = frame
 
         # update state visitation table
-        state = np.argmax(frame)
-        self.count_table[state] += 1
+        # state = np.argmax(frame)
+        # self.count_table[state] += 1
 
         ret = self.next_idx
         self.next_idx = (self.next_idx + 1) % self.size

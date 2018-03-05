@@ -22,6 +22,7 @@ def get_Q(model, state):
 
 def Q_values(env, model):
     n = env.state_size()
+    # n = env.observation_space.n
     states = np.identity(n)
     Q = torch.zeros(n, env.num_actions())
     for i, row in enumerate(states):
@@ -38,8 +39,10 @@ def start_state_value(env, model):
 
 def Q_dump(env, model):
     n = env.state_size()
+    # n = env.observation_space.n
     m = int(n ** 0.5)
     Q = Q_values(env, model)
     for i, row in enumerate(Q.t()):
         print("Action {}".format(i))
         print(row.contiguous().view(m, m))
+        # print(row.contiguous())
