@@ -100,7 +100,7 @@ def atari_learn(env,
     ######
     # define optimizer
     # optimizer = torch.optim.Adam(Q.parameters())
-    optimizer_spec.constructor(Q.parameters(), **optimizer_spec.kwargs)
+    optimizer = optimizer_spec.constructor(Q.parameters(), **optimizer_spec.kwargs)
 
     # construct the replay buffer
     replay_buffer = ReplayBuffer(config.replay_mem_size, config.frame_history_len)
@@ -137,7 +137,7 @@ def atari_learn(env,
 
         # reset environment if end of episode
         if done:
-            state = env.reset()
+            next_state = env.reset()
         # move onto next state
         state = next_state
         #####
@@ -177,20 +177,27 @@ def atari_learn(env,
             # requires_grad=False
             expected_state_action_values.volatile = False
 
-            if config.deep:
-                loss = F.smooth_l1_loss(state_action_values, expected_state_action_values)
-            else:
-                loss = (state_action_values - expected_state_action_values).pow(2).sum()
-            loss_list.append(loss.data[0])
-            #####
-            optimizer.zero_grad()
+            # todo fix
+            bellman_err = expected_state_action_values - state_action_values
+            clipped_bellman_error = bellman_err.clamp(-1, 1)
+            d_error = clipped_bellman_error * -1.0
+            state_action_values.backward(d_error.data.unsqueeze(1))
 
-            # pass back gradient
-            loss.backward()
-
-            # clip gradient
-            if config.clip_grad:
-                nn.utils.clip_grad_norm(Q.parameters(), 10.)
+            ############
+            # if config.deep:
+            #     loss = F.smooth_l1_loss(state_action_values, expected_state_action_values)
+            # else:
+            #     loss = (state_action_values - expected_state_action_values).pow(2).sum()
+            # loss_list.append(loss.data[0])
+            # #####
+            # optimizer.zero_grad()
+            # # pass back gradient
+            # loss.backward()
+            #
+            # # clip gradient
+            # if config.clip_grad:
+            #     nn.utils.clip_grad_norm(Q.parameters(), 10.)
+            #########################
 
             # take parameter step
             optimizer.step()

@@ -6,7 +6,6 @@ import sys
 import gym
 import numpy as np
 import random
-import gym_gridworld
 # import sys
 import logging
 # import argparse
@@ -81,7 +80,7 @@ def main(config, env):
     :return:
     """
     # FLAGS = update_tf_wrapper_args(args, utils.tf_wrapper.FLAGS)
-    num_iterations = float(config.num_iterations) / 4.0
+    num_iterations = float(config.max_timesteps) / 4.0
 
     # learning rate schedule
     lr_multiplier = 1.0
