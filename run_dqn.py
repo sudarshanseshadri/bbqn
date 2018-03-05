@@ -81,7 +81,7 @@ def main(config, env):
     :return:
     """
     # FLAGS = update_tf_wrapper_args(args, utils.tf_wrapper.FLAGS)
-    num_iterations = 10000000
+    num_iterations = config.num_iterations
 
     # learning rate schedule
     lr_schedule = PiecewiseSchedule([
