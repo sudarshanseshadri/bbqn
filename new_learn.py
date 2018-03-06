@@ -19,7 +19,7 @@ import logging
 from configs.dqn_config import Config
 from models.deep_dqn import DQN
 
-OptimizerSpec = namedtuple("OptimizerSpec", ["constructor", "kwargs", "lr_schedule"])
+OptimizerSpec = namedtuple("OptimizerSpec", ["constructor", "kwargs"])
 
 Statistic = {
     "mean_episode_rewards": [],
@@ -447,7 +447,7 @@ def fake_learn(env, q_func, optimizer_spec,
             # convert variables to torch tensor variables
             # (32, 84, 84, 4)
             obs_batch = Variable(torch.from_numpy(obs_batch).type(FloatTensor)/255.0)
-            act_batch = Variable(torch.from_numpy(act_batch))
+            act_batch = Variable(torch.from_numpy(act_batch).type(LongTensor))
             rew_batch = Variable(torch.from_numpy(rew_batch).type(FloatTensor))
             next_obs_batch = Variable(torch.from_numpy(next_obs_batch).type(FloatTensor)/255.0)
             not_done_mask = Variable(torch.from_numpy(1 - done_mask).type(FloatTensor))
