@@ -8,15 +8,16 @@ import numpy as np
 import random
 # import sys
 import logging
-# import argparse
+import argparse
 from models.linear_models import *
 from models.deep_dqn import DQN
-from new_learn import atari_learn
 import utils
 from utils.gym_atari_wrappers import get_env, get_wrapper_by_name
 from utils.schedule import LinearSchedule, PiecewiseSchedule
 from configs.dqn_config import Config
-from new_learn import OptimizerSpec, fake_learn
+from new_learn import OptimizerSpec, fake_learn, atari_learn
+# import pixel
+from utils.tf_wrapper import PixelBonus
 
 # do logging
 logger = logging.getLogger(__name__)
@@ -129,9 +130,9 @@ def main(config, env):
     TARGET_UPDATE_FREQ = 4
     LEARNING_RATE = 0.00025
     EPS = 1e-2
-    BETA = 0.5
+    BETA = 0.8
 
-    # FLAGS = update_tf_wrapper_args(args, dqn_utils.tf_wrapper.FLAGS)
+    FLAGS = update_tf_wrapper_args(args, utils.tf_wrapper.FLAGS)
 
     def stopping_criterion(env, t):
         # t := number of steps of wrapped env

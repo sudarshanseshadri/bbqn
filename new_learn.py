@@ -233,10 +233,11 @@ def atari_learn(env,
             # logging.info('average loss: %f' % np.mean(loss_list))
 
 
-def fake_learn(env, q_func, optimizer_spec, exploration=LinearSchedule(1000000, 0.1),
-          stopping_criterion=None, replay_buffer_size=1e6, batch_size=32,
-          gamma=0.99, beta=0.5, learning_starts=50000, learning_freq=4,
-          frame_history_len=4, target_update_freq=10000):
+def fake_learn(env, q_func, optimizer_spec,
+               exploration=LinearSchedule(1000000, 0.1),
+               stopping_criterion=None, replay_buffer_size=1e6, batch_size=32,
+               gamma=0.99, beta=0.5, learning_starts=50000, learning_freq=4,
+               frame_history_len=4, target_update_freq=10000):
     """Run Deep Q-learning algorithm.
 
     You can specify your own convnet using q_func.
@@ -281,19 +282,19 @@ def fake_learn(env, q_func, optimizer_spec, exploration=LinearSchedule(1000000, 
         If not None gradients' norms are clipped to this value.
     """
     ###################################
-    # # todo: just for easy checking
-    seed = 1234
-    torch.manual_seed(seed)
-    np.random.seed(seed)
-    random.seed(seed)
-    env = get_env('PongNoFrameskip-v4', seed, False)
-    q_func = DQN
-    def stopping_criterion(env, t):
-        # t := num steps of wrapped env // different from num steps in underlying env
-        return get_wrapper_by_name(env, "Monitor").get_total_steps() >= 40000000
-
-    # decay schedule
-    exploration = LinearSchedule(1000000, 0.1)
+    # # # todo: just for easy checking
+    # seed = 1234
+    # torch.manual_seed(seed)
+    # np.random.seed(seed)
+    # random.seed(seed)
+    # env = get_env('PongNoFrameskip-v4', seed, False)
+    # q_func = DQN
+    # def stopping_criterion(env, t):
+    #     # t := num steps of wrapped env // different from num steps in underlying env
+    #     return get_wrapper_by_name(env, "Monitor").get_total_steps() >= 40000000
+    #
+    # # decay schedule
+    # exploration = LinearSchedule(1000000, 0.1)
     ###################################
     # this is just to make sure that you're operating in the correct environment
     assert type(env.observation_space) == gym.spaces.Box
@@ -314,6 +315,9 @@ def fake_learn(env, q_func, optimizer_spec, exploration=LinearSchedule(1000000, 
     in_channel = input_shape[-1]
     Q = q_func(in_channel, num_actions)
     target_Q = q_func(in_channel, num_actions)
+
+    # call tensorflow wrapper to get density model
+    # density = density(cnn_kwargs)
 
     if USE_CUDA:
         Q.cuda()
@@ -341,7 +345,6 @@ def fake_learn(env, q_func, optimizer_spec, exploration=LinearSchedule(1000000, 
 
     # construct the replay buffer
     replay_buffer = MMCReplayBuffer(replay_buffer_size, frame_history_len)
-    # replay_buffer = ReplayBuffer(replay_buffer_size, frame_history_len)
 
     ###############
     # RUN ENV     #
@@ -357,6 +360,11 @@ def fake_learn(env, q_func, optimizer_spec, exploration=LinearSchedule(1000000, 
     reward_each_timestep = []
     timesteps_in_buffer = []
     cur_timestep = 0
+
+    # avoid numeric overflow; perturb
+    max_val = np.finfo(np.float32).max
+    max_val -= 1e-10
+    c = 0.1
 
     # monte_carlo returns
     for t in itertools.count():
@@ -386,9 +394,6 @@ def fake_learn(env, q_func, optimizer_spec, exploration=LinearSchedule(1000000, 
             action = random.randrange(num_actions)
 
         # advance one step
-        # obs.shape = (84, 84, 1)
-        # reward = 0.0 (scalar)
-        # done = False
         obs, reward, done, _ = env.step(action)
         # clip reward to be in [-1, +1]
         reward = max(-1.0, min(reward, 1.0))

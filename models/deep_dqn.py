@@ -17,10 +17,6 @@ class DQN(nn.Module):
         self.fc4 = nn.Linear(7 * 7 * 64, 512)
         self.fc5 = nn.Linear(512, n_actions)
 
-        # cutting down on size for downsampled Atari images
-        # self.fc4 = nn.Linear(64, 32)
-        # self.fc5 = nn.Linear(32, num_actions)
-
     def random_exploration(self):
         return True
 
