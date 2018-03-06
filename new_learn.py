@@ -10,7 +10,7 @@ from collections import namedtuple, defaultdict
 from models.linear_models import *
 from utils.helpers import *
 import torch.nn.functional as F
-from utils.updated_replay import ReplayBuffer
+from utils.updated_replay import ReplayBuffer, MMCReplayBuffer
 from utils.schedule import LinearSchedule
 from utils.gym_atari_wrappers import get_wrapper_by_name, get_env
 from torch.autograd import Variable
@@ -340,8 +340,8 @@ def fake_learn(env, q_func, optimizer_spec, exploration=LinearSchedule(1000000, 
     optimizer = optimizer_spec.constructor(Q.parameters(), **optimizer_spec.kwargs)
 
     # construct the replay buffer
-    # replay_buffer = MMCReplayBuffer(replay_buffer_size, frame_history_len)
-    replay_buffer = ReplayBuffer(replay_buffer_size, frame_history_len)
+    replay_buffer = MMCReplayBuffer(replay_buffer_size, frame_history_len)
+    # replay_buffer = ReplayBuffer(replay_buffer_size, frame_history_len)
 
     ###############
     # RUN ENV     #
@@ -392,23 +392,31 @@ def fake_learn(env, q_func, optimizer_spec, exploration=LinearSchedule(1000000, 
         obs, reward, done, _ = env.step(action)
         # clip reward to be in [-1, +1]
         reward = max(-1.0, min(reward, 1.0))
+
+        # store reward in list to use for calculating MMC update
+        reward_each_timestep.append(reward)
         replay_buffer.store_effect(last_idx, action, reward, done)
 
         # reset environment when reaching episode boundary
         if done:
             # episode has terminated --> need to do MMC update here
             # loop through all transitions of this past episode and add in mc_returns
-            # mc_returns = np.zeros(len(timesteps_in_buffer))
-            # r = 0
-            # for i in reversed(range(len(mc_returns))):
-            #     r = reward_each_timestep[i] + gamma * r
-            #     mc_returns[i] = r
-            # # populate replay buffer
-            # for j in range(len(mc_returns)):
-            #     # get transition tuple in reward buffer and update
-            #     update_idx = episode_indices_in_buffer[j]
-            #     # put mmc return back into replay buffer
-            #     replay_buffer.mc_return_t[update_idx] = mc_returns[j]
+            assert len(timesteps_in_buffer) == len(reward_each_timestep)
+            mc_returns = np.zeros(len(timesteps_in_buffer))
+
+            # compute mc returns
+            r = 0
+            for i in reversed(range(len(mc_returns))):
+                r = reward_each_timestep[i] + gamma * r
+                mc_returns[i] = r
+
+            # populate replay buffer
+            for j in range(len(mc_returns)):
+                # get transition tuple in reward buffer and update
+                update_idx = episode_indices_in_buffer[j]
+                # put mmc return back into replay buffer
+                replay_buffer.mc_return_t[update_idx] = mc_returns[j]
+
             # reset because end of episode
             episode_indices_in_buffer = []
             timesteps_in_buffer = []
@@ -427,49 +435,41 @@ def fake_learn(env, q_func, optimizer_spec, exploration=LinearSchedule(1000000, 
         # perform training
         if (t > learning_starts and t % learning_freq == 0 and
                 replay_buffer.can_sample(batch_size)):
-            # sample batch of transitions
-            obs_batch, act_batch, rew_batch, next_obs_batch, done_mask = \
+            # sample batch of transitions --> also grab MMC batch
+            obs_batch, act_batch, rew_batch, next_obs_batch, done_mask, mc_batch = \
                 replay_buffer.sample(batch_size)
 
             # convert variables to torch tensor variables
             # (32, 84, 84, 4)
             obs_batch = Variable(torch.from_numpy(obs_batch).type(FloatTensor)/255.0)
-            # (32,)
             act_batch = Variable(torch.from_numpy(act_batch))
-            # (32, )
             rew_batch = Variable(torch.from_numpy(rew_batch).type(FloatTensor))
-            # (32, 84, 84, 4)
             next_obs_batch = Variable(torch.from_numpy(next_obs_batch).type(FloatTensor)/255.0)
-            # (32, )
             not_done_mask = Variable(torch.from_numpy(1 - done_mask).type(FloatTensor))
-            # (32, )
-            # mc_batch = Variable(torch.from_numpy(mc_batch).type(dtype))
-            # mc_batch = Variable(torch.from_numpy(mc_batch))
-
-            # if USE_CUDA:
-            #     act_batch = act_batch.cuda()
-            #     rew_batch = rew_batch.cuda()
-                # mc_batch = mc_batch.cuda()
+            mc_batch = Variable(torch.from_numpy(mc_batch).type(FloatTensor))
 
             # 3.c: train the model
             # perform gradient step and update the network parameters
             # this returns [32, 18] --> [32 x 1]
             # i squeezed this so that it'll give me [32]
             current_Q_values = Q(obs_batch).gather(1, act_batch.unsqueeze(1)).squeeze()
+
             # goes from [32, 18] --> [32]
             # this gives you a FloatTensor of size 32 // gives values of max
+
             next_max_q = target_Q(next_obs_batch).detach().max(1)[0]
+
             # torch.FloatTensor of size 32
             next_Q_values = not_done_mask * next_max_q
 
             # this is [r(x,a) + gamma * max_a' Q(x', a')]
             target_Q_values = rew_batch + (gamma * next_Q_values)
             # mixed MC update would be:
-            # mixed_target_Q_values = (beta * target_Q_values) + (1 - beta) * mc_batch
+            mixed_target_Q_values = (beta * target_Q_values) + (1 - beta) * mc_batch
 
             # replace target_Q_values with mixed target
-            bellman_err = target_Q_values - current_Q_values
-            # bellman_err = mixed_target_Q_values - current_Q_values
+            # bellman_err = target_Q_values - current_Q_values
+            bellman_err = mixed_target_Q_values - current_Q_values
             clipped_bellman_err = bellman_err.clamp(-1, 1)
 
             d_err = clipped_bellman_err * -1.0

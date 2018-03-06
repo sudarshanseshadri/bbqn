@@ -192,3 +192,94 @@ class ReplayBuffer(object):
         self.action[idx] = action
         self.reward[idx] = reward
         self.done[idx]   = done
+
+
+class MMCReplayBuffer(ReplayBuffer):
+    """
+    slight modification of ReplayBuffer class to accommodate Monte Carlo returns per
+    episode. In mixed Monte Carlo updates (MMC), the replay buffer stores an additional
+    element in the tuple:
+    (s_t, a_t, r_t, s_{t+1}) --> (s_t, a_t, r_t, s_{t+1}, mc_return_t)
+
+    when tuples are added mid-episode, mc_return_t is initialized to 0.
+    at the end of each episode, we iterate over all transitions (seen in that
+    particular episode) and add in their correct MC return.
+    """
+
+    def __init__(self, size, frame_history_len):
+        super().__init__(size, frame_history_len)
+        self.mc_return_t = None
+
+    def _encode_sample(self, idxes):
+        obs_batch = np.concatenate([self._encode_observation(idx)[None] for idx in idxes], 0)
+        act_batch = self.action[idxes]
+        rew_batch = self.reward[idxes]
+        next_obs_batch = np.concatenate([self._encode_observation(idx + 1)[None] for idx in idxes], 0)
+        done_mask = np.array([1.0 if self.done[idx] else 0.0 for idx in idxes], dtype=np.float32)
+        # return appropriate mc_returns
+        mc_returns = self.mc_return_t[idxes]
+
+        return obs_batch, act_batch, rew_batch, next_obs_batch, done_mask, mc_returns
+
+    def store_frame(self, frame):
+        """Store a single frame in the buffer at the next available index, overwriting
+        old frames if necessary.
+        Parameters
+        ----------
+        frame: np.array
+            Array of shape (img_h, img_w, img_c) and dtype np.uint8
+            the frame to be stored
+        Returns
+        -------
+        idx: int
+            Index at which the frame is stored. To be used for `store_effect` later.
+        """
+        if self.obs is None:
+            self.obs = np.empty([self.size] + list(frame.shape), dtype=np.uint8)
+            self.action = np.empty([self.size], dtype=np.int32)
+            self.reward = np.empty([self.size], dtype=np.float32)
+            self.done = np.empty([self.size], dtype=np.bool)
+            # initialize list for MMC update
+            self.mc_return_t = np.empty([self.size], dtype=np.float32)
+        self.obs[self.next_idx] = frame
+
+        ret = self.next_idx
+        self.next_idx = (self.next_idx + 1) % self.size
+        self.num_in_buffer = min(self.size, self.num_in_buffer + 1)
+
+        return ret
+
+    def store_effect(self, idx, action, reward, done):
+        """Store effects of action taken after observing frame stored
+        at index idx. The reason `store_frame` and `store_effect` is broken
+        up into two functions is so that once can call `encode_recent_observation`
+        in between.
+        Paramters
+        ---------
+        idx: int
+            Index in buffer of recently observed frame (returned by `store_frame`).
+        action: int
+            Action that was performed upon observing this frame.
+        reward: float
+            Reward that was received when the actions was performed.
+        done: bool
+            True if episode was finished after performing that action.
+        """
+        self.action[idx] = action
+        self.reward[idx] = reward
+        self.done[idx] = done
+        # intialize this to 0 when added mid-episode
+        self.mc_return_t[idx] = 0.
+
+    def grab_tuple(self, idx):
+        """
+        print tuple in replay buffer for debugging purposes
+        (s_t, a_t, r_t, s_{t+1}, mc_return_t)
+        s_t here is an observation batch so it's hard to print -- let's forget about
+        this for now
+        :param idx:
+        :return:
+        """
+        print('(a_t: {}, r_t: {}, mc_return_t: {})'.format(
+            self.action[idx], self.reward[idx], self.mc_return_t[idx]
+        ))
