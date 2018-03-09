@@ -58,13 +58,19 @@ class ReplayMemory(object):
         self.capacity = capacity
         self.memory = []
         self.position = 0
+        self.count_table = np.zeros(env.state_size())
 
     def push(self, *args):
         """Saves a transition."""
         if len(self.memory) < self.capacity:
             self.memory.append(None)
-        self.memory[self.position] = Transition(*args)
+        transition = Transition(*args)
+        self.memory[self.position] = transition
         self.position = (self.position + 1) % self.capacity
+
+        # keep track of visited stsates
+        state = np.argmax(transition.state[0].numpy())
+        self.count_table[state] += 1
 
     def sample(self, batch_size):
         return random.sample(self.memory, batch_size)
@@ -167,6 +173,12 @@ def simulate(model, env, config):
             reward_batch = Variable(torch.cat(batch.reward))
             next_states = Variable(torch.cat(batch.next_state), volatile=True)
 
+            # augment rewards here
+            if config.bonus:
+                states_visited = np.nonzero(state_batch.data.numpy())[1]
+                bonus_batch = Variable(Tensor(config.beta/np.sqrt(memory.count_table[
+                                                               states_visited])))
+                reward_batch = reward_batch + bonus_batch
 
             # Compute Q(s_t, a) - the model computes Q(s_t), then we select the
             # columns of actions taken
