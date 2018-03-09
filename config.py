@@ -7,6 +7,10 @@ class Config():
 
     train_time_seconds = 60
 
+    # exploration bonus
+    bonus = True
+    beta = 0.1
+
     linear_decay = False
     train_in_epochs = True
     # train_in_epochs = False
