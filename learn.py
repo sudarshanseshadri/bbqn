@@ -78,6 +78,30 @@ class ReplayMemory(object):
             freqs[state][action] += 1
         return freqs
 
+    def state_counts(self):
+        freqs = defaultdict(int)
+        for transition in self.memory:
+            state = transition.state[0].numpy()
+            state = np.argmax(state)
+            freqs[state] += 1
+        return freqs
+
+    def display_state_counts(self, savename, figure_num):
+        n = env.state_size()
+        m = int(n ** 0.5)
+
+        freqs = self.state_counts()
+        grid = np.zeros((m,m))
+        for i in range(m):
+            for j in range(m):
+                grid[i,j] = freqs[m*i+j]
+        old_figure = plt.gcf().number
+        plt.figure(figure_num)
+        sns.heatmap(grid)
+        plt.savefig(savename)
+        plt.close()
+        plt.figure(old_figure)
+
     def __len__(self):
         return len(self.memory)
 
@@ -113,8 +137,6 @@ def simulate(model, env, config):
     last_sync = [0] #in an array since py2.7 does not have "nonlocal"
 
     loss_list = []
-    sigma_average_dict = defaultdict(list)
-    components = ['W']
 
     def optimize_model(model):
         if len(memory) < config.batch_size:
@@ -215,7 +237,7 @@ def simulate(model, env, config):
         score = 0
         while iters < config.max_ep_len:
             do_update = False
-            if iters % config.period_sample == 0:
+            if steps_done % config.period_sample == 0:
                 if model.variational():
                     w_sample = model.sample()
                 do_update = not config.train_in_epochs
@@ -229,9 +251,10 @@ def simulate(model, env, config):
             score += reward
             reward = Tensor([reward])
 
+
             # Store the transition in memory
             memory.push(state, action, next_state, reward)
-
+            
             # Move to the next state
             state = next_state
 
@@ -241,11 +264,8 @@ def simulate(model, env, config):
             if done:
                 break
 
-
-        # if model.variational():
-        #     for idx, sigma in enumerate(model.get_sigma_l()):
-        #         average = sigma.mean().data[0]
-        #         sigma_average_dict[components[idx]].append(average)
+        # if i_episode == 3000:
+        #     memory.display_state_counts(folder_name+"{}_state_counts.png".format(name), 3) #figure(3) not used yet
         if i_episode % 100 == 0:
             if model.variational():
                 print "Episode: {}\tscore: {}".format(i_episode, score)
@@ -263,9 +283,9 @@ def simulate(model, env, config):
             optimize_model(model)
         i_episode += 1
 
-    print memory.state_action_counts()
+    # print memory.state_action_counts()
     Q_dump(env, model)
-    return loss_list, score_list, time_list, value_list, sigma_average_dict['W']
+    return loss_list, score_list, time_list, value_list
 
 #Debug/display helper functions
 def get_Q(model, state):
@@ -313,9 +333,9 @@ env = gym.make(config.env_name).unwrapped
 models = []
 
 models.append(lambda: ("DQN", Linear_DQN(env.state_size(), env.num_actions())))
-models.append(lambda: ("Double DQN", Linear_Double_DQN(env.state_size(), env.num_actions())))
+# models.append(lambda: ("Double DQN", Linear_Double_DQN(env.state_size(), env.num_actions())))
 models.append(lambda: ("BBQN", Linear_BBQN(env.state_size(), env.num_actions(), RHO_P, bias=False)))
-models.append(lambda: ("Heavy BBQN", Heavy_BBQN(env.state_size(), env.num_actions(), RHO_P, bias=False)))
+# models.append(lambda: ("Heavy BBQN", Heavy_BBQN(env.state_size(), env.num_actions(), RHO_P, bias=False)))
 
 color_dict = {"DQN":'red', "Double DQN":"green", "BBQN":"blue", "Heavy BBQN":"yellow"}
 
@@ -325,16 +345,20 @@ time_bins = np.arange(0.0, config.train_time_seconds+time_step, time_step)
 y = [3.0 for _ in time_bins]
 plt.plot(y, linestyle='dashed', label="Optimal", color='k')
 
+folder_name = "./results/simple_10x10/"
+# folder_name = "./results/complex_10x10/"
+
 longest_episodes = 0
 for index, constructor in enumerate(models):
     time_data_plot = []
     episodes_data_plot = []
     for trial in range(config.num_trials):
         name, model = constructor()
-        loss_average, score_list, time_list, value_list, sigma_average = simulate(model, env, config)
+        loss_average, score_list, time_list, value_list = simulate(model, env, config)
         episodes_data_plot.append(value_list)
         interpolated_values = np.interp(time_bins, time_list, value_list)
         time_data_plot.append(list(interpolated_values))
+
 
     min_len = min([len(data) for data in episodes_data_plot])
     longest_episodes = max(longest_episodes, min_len)
@@ -348,11 +372,8 @@ plt.figure(2)
 y = [3.0 for _ in range(longest_episodes)]
 plt.plot(y, linestyle='dashed', label="Optimal", color='k')
 
-folder_name = "./results/simple_5x5/"
-# folder_name = "./results/complex_5x5/"
-
 plt.figure(1)
-plt.title("Comparison of training times when sampling is expensive")
+plt.title("Comparison of training times")
 plt.xlabel("Training time (seconds)")
 plt.ylabel("Value of start state")
 # plt.savefig(folder_name+"dqn_bbqn_time.png")
