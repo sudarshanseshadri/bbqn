@@ -29,17 +29,17 @@ class Linear_DQN(nn.Module):
         return self.head(x.view(x.size(0), -1))
 
     def save_target(self):
-    	self.target = deepcopy(self.head)
+        self.target = deepcopy(self.head)
 
     def target_value(self, rewards, gamma, states):
-    	assert self.target is not None, "Must call save_target at least once before calculating target_value"
+        assert self.target is not None, "Must call save_target at least once before calculating target_value"
         q_s = self.target(states.view(states.size(0), -1))
         q_sa = q_s.max(1)[0]
         return rewards + gamma * q_sa
 
 class Linear_Double_DQN(Linear_DQN):
     def target_value(self, rewards, gamma, states):
-    	assert self.target is not None, "Must call save_target at least once before calculating target_value"
+        assert self.target is not None, "Must call save_target at least once before calculating target_value"
         q_s = self.head(states.view(states.size(0), -1))
         actions = q_s.max(1)[1].view(-1, 1)
         q_s = self.target(states.view(states.size(0), -1))
