@@ -73,12 +73,12 @@ class Variational_Linear_Layer():
     def sample(self):
 
         W_sigma = Variational_Linear_Layer.calc_sigma(self.W_rho)
-        W_sample = self.W_mu + Variable(torch.randn(self.W_mu.size()), requires_grad=True) * W_sigma
+        W_sample = self.W_mu + Variable(torch.randn(self.W_mu.size()), requires_grad=False) * W_sigma
         self.W_sample = W_sample
 
         if self.bias:
             b_sigma = Variational_Linear_Layer.calc_sigma(self.b_rho)
-            b_sample = self.b_mu + Variable(torch.randn(self.b_mu.size()), requires_grad=True) * b_sigma
+            b_sample = self.b_mu + Variable(torch.randn(self.b_mu.size()), requires_grad=False) * b_sigma
             self.b_sample = b_sample
             return [self.W_sample, self.b_sample]
         else: 

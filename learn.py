@@ -12,7 +12,7 @@ import seaborn as sns
 from collections import namedtuple, defaultdict
 from itertools import count
 from copy import deepcopy
-from time import time
+from time import clock
 import argparse
 
 import torch
@@ -173,12 +173,10 @@ def simulate(model, env, config):
             reward_batch = Variable(torch.cat(batch.reward))
             next_states = Variable(torch.cat(batch.next_state), volatile=True)
 
-            # augment rewards here
-            if config.bonus:
+            # augment rewards here, if applicable
+            if model.count_based():
                 states_visited = np.nonzero(state_batch.data.numpy())[1]
-                bonus_batch = Variable(Tensor(config.beta/np.sqrt(memory.count_table[
-                                                               states_visited])))
-                reward_batch = reward_batch + bonus_batch
+                reward_batch += model.bonus_reward(memory.count_table[states_visited])
 
             # Compute Q(s_t, a) - the model computes Q(s_t), then we select the
             # columns of actions taken
@@ -237,22 +235,20 @@ def simulate(model, env, config):
     value_list = []
     score_list = []
 
-    start_time = time()
+    start_time = clock()
     i_episode = 0
     steps_done = 0
 
-    while time() - start_time < config.train_time_seconds:
+    while clock() - start_time < config.train_time_seconds:
         # Initialize the environment and state
         env.reset()
         state = Tensor(env.get_state()).unsqueeze(0)
         iters = 0
         score = 0
         while iters < config.max_ep_len:
-            do_update = False
-            if steps_done % config.period_sample == 0:
-                if model.variational():
-                    w_sample = model.sample()
-                do_update = not config.train_in_epochs
+            do_update = not config.train_in_epochs
+            if model.variational() and steps_done % model.sample_period == 0:
+                w_sample = model.sample()
             iters += 1
             
             # Select and perform an action
@@ -276,8 +272,8 @@ def simulate(model, env, config):
             if done:
                 break
 
-        # if i_episode == 3000:
-        #     memory.display_state_counts(folder_name+"{}_state_counts.png".format(name), 3) #figure(3) not used yet
+        if i_episode % 1000 == 0 and i_episode > 0:
+            memory.display_state_counts(folder_name+"{}_state_counts_{}.png".format(name, i_episode), 4) #figure(4) not used yet
         if i_episode % 100 == 0:
             if model.variational():
                 print "Episode: {}\tscore: {}".format(i_episode, score)
@@ -285,7 +281,7 @@ def simulate(model, env, config):
                 print "Episode: {}\tscore: {}\tepsilon: {}".format(i_episode, score, effective_eps)
 
         value = start_state_value(env, model)
-        elapsed = time() - start_time
+        elapsed = clock() - start_time
 
         time_list.append(elapsed)
         value_list.append(value)
@@ -295,7 +291,7 @@ def simulate(model, env, config):
             optimize_model(model)
         i_episode += 1
 
-    # print memory.state_action_counts()
+    memory.display_state_counts(folder_name+"{}_state_counts_final.png".format(name), 4) #figure(4) not used yet
     Q_dump(env, model)
     return loss_list, score_list, time_list, value_list
 
@@ -332,6 +328,24 @@ def Q_dump(env, model):
         print "Action {}".format(i)
         print row.contiguous().view(m, m)
 
+def generate_models(env):
+    models = []
+    models.append(lambda: ("DQN", Linear_DQN(env.state_size(), env.num_actions())))
+    models.append(lambda: ("Double DQN", Linear_Double_DQN(env.state_size(), env.num_actions())))
+
+    models.append(lambda: ("Exp-Bonus DQN Beta={}".format(1.0), \
+        Linear_Expl_Bonus_DQN(env.state_size(), env.num_actions(), beta=1.0)))
+    models.append(lambda: ("Exp-Bonus DQN Beta={}".format(5.0), \
+        Linear_Expl_Bonus_DQN(env.state_size(), env.num_actions(), beta=5.0)))
+
+    models.append(lambda: ("BBQN sample_period={}".format(5), \
+            Linear_BBQN(env.state_size(), env.num_actions(), RHO_P, sample_period=5, bias=False)))
+    models.append(lambda: ("BBQN sample_period={}".format(10), \
+            Linear_BBQN(env.state_size(), env.num_actions(), RHO_P, sample_period=10, bias=False)))
+    
+
+    return models
+
 #### MAIN ####
 random.seed()
 
@@ -342,58 +356,74 @@ STD_DEV_P = math.log1p(math.exp(RHO_P))
 config = Config()
 
 env = gym.make(config.env_name).unwrapped
-models = []
+models = generate_models(env)
 
-models.append(lambda: ("DQN", Linear_DQN(env.state_size(), env.num_actions())))
-# models.append(lambda: ("Double DQN", Linear_Double_DQN(env.state_size(), env.num_actions())))
-models.append(lambda: ("BBQN", Linear_BBQN(env.state_size(), env.num_actions(), RHO_P, bias=False)))
-# models.append(lambda: ("Heavy BBQN", Heavy_BBQN(env.state_size(), env.num_actions(), RHO_P, bias=False)))
+color_list = ['red', 'green', 'blue', 'purple', 'yellow', 'orange']
 
-color_dict = {"DQN":'red', "Double DQN":"green", "BBQN":"blue", "Heavy BBQN":"yellow"}
-
-plt.figure(1)
 time_step = 0.2
 time_bins = np.arange(0.0, config.train_time_seconds+time_step, time_step)
-y = [3.0 for _ in time_bins]
-plt.plot(y, linestyle='dashed', label="Optimal", color='k')
 
-folder_name = "./results/simple_10x10/"
-# folder_name = "./results/complex_10x10/"
+# folder_name = "./results/simple_10x10/"
+folder_name = "./results/complex_5x5/"
+
+N = 50
+smoothing_filter = np.ones(N)/N
 
 longest_episodes = 0
 for index, constructor in enumerate(models):
     time_data_plot = []
     episodes_data_plot = []
+    score_episodes_data_plot = []
+
     for trial in range(config.num_trials):
         name, model = constructor()
         loss_average, score_list, time_list, value_list = simulate(model, env, config)
         episodes_data_plot.append(value_list)
+        score_episodes_data_plot.append(np.convolve(score_list, smoothing_filter, mode='same'))
         interpolated_values = np.interp(time_bins, time_list, value_list)
         time_data_plot.append(list(interpolated_values))
-
 
     min_len = min([len(data) for data in episodes_data_plot])
     longest_episodes = max(longest_episodes, min_len)
     episodes_data_plot = [data[:min_len] for data in episodes_data_plot]
+    score_episodes_data_plot = [data[:min_len] for data in score_episodes_data_plot]
     plt.figure(1)        
-    sns.tsplot(data=time_data_plot, time=time_bins, condition=name, legend=True, color=color_dict)
+    sns.tsplot(data=time_data_plot, time=time_bins, condition=name, legend=True, color=color_list[index])
     plt.figure(2)
-    sns.tsplot(data=episodes_data_plot, condition=name, legend=True, color=color_dict)
+    sns.tsplot(data=episodes_data_plot, condition=name, legend=True, color=color_list[index])
+    plt.figure(3)
+    sns.tsplot(data=score_episodes_data_plot, condition=name, legend=True, color=color_list[index])
+
+optimal_value = 3
+
+plt.figure(1)
+y = [optimal_value for _ in time_bins]
+plt.plot(y, linestyle='dashed', label="Optimal", color='k')
 
 plt.figure(2)
-y = [3.0 for _ in range(longest_episodes)]
+y = [optimal_value for _ in range(longest_episodes)]
+plt.plot(y, linestyle='dashed', label="Optimal", color='k')
+
+plt.figure(3)
+y = [optimal_value for _ in range(longest_episodes)]
 plt.plot(y, linestyle='dashed', label="Optimal", color='k')
 
 plt.figure(1)
-plt.title("Comparison of training times")
+plt.title("Target Value Change versus Time")
 plt.xlabel("Training time (seconds)")
 plt.ylabel("Value of start state")
-# plt.savefig(folder_name+"dqn_bbqn_time.png")
+plt.savefig(folder_name+"model_comp_time.png")
 
 plt.figure(2)
-plt.title("Comparison of training effectiveness")
+plt.title("Target Value Change versus Episodes")
 plt.xlabel("Number of episodes")
 plt.ylabel("Value of start state")
-# plt.savefig(folder_name+"/dqn_bbqn_episodes.png")
+plt.savefig(folder_name+"/model_comp_episodes.png")
+
+plt.figure(3)
+plt.title("Achieved Score versus Episodes")
+plt.xlabel("Number of episodes")
+plt.ylabel("Smoothed score")
+plt.savefig(folder_name+"/model_comp_cumul_score.png")
 
 plt.show()

@@ -1,15 +1,11 @@
 class Config():
     env_name = 'gym_onehotgrid-v0'
     gamma = 1.0
-    num_trials = 5
-    max_ep_len = 30
+    num_trials = 10
+    max_ep_len = 50
     replay_mem_size = 2**14
 
-    train_time_seconds = 60
-
-    # exploration bonus
-    bonus = True
-    beta = 0.1
+    train_time_seconds = 60*2
 
     linear_decay = False
     train_in_epochs = True
@@ -19,14 +15,12 @@ class Config():
         num_target_reset = 2
         num_epochs = 2
         batch_size = 256
-        period_sample = 1
         ep_start = 1.0
         ep_end = 0.01
         ep_decay = 5000
     else:
         period_target_reset = 2000
         batch_size = 64
-        period_sample = 1
         ep_start = 1.0
         ep_end = 0.01
         ep_decay = 5000

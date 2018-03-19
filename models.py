@@ -7,7 +7,13 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
+
 from Variational_Linear_Layer import Variational_Linear_Layer
+
+use_cuda = torch.cuda.is_available()
+FloatTensor = torch.cuda.FloatTensor if use_cuda else torch.FloatTensor
+Tensor = FloatTensor
+
 
 #same as torch.nn.Linear, but no initialization
 class Linear_Zero_Init(nn.Linear):
@@ -23,6 +29,9 @@ class Linear_DQN(nn.Module):
         self.target = None
         
     def variational(self):
+        return False
+
+    def count_based(self):
         return False
 
     def forward(self, x):
@@ -46,12 +55,24 @@ class Linear_Double_DQN(Linear_DQN):
         q_sa = q_s.gather(1, actions).view(-1)
         return rewards + gamma * q_sa
 
+class Linear_Expl_Bonus_DQN(Linear_DQN):
+    def __init__(self, num_features, num_outputs, beta):
+        super(Linear_Expl_Bonus_DQN, self).__init__(num_features, num_outputs)
+        self.beta = beta
+
+    def count_based(self):
+        return True
+
+    def bonus_reward(self, state_counts):
+        return Variable(Tensor(self.beta/np.sqrt(state_counts)), requires_grad=False)
+
 class Linear_BBQN():
-    def __init__(self, num_features, num_actions, rho, bias=True):
+    def __init__(self, num_features, num_actions, rho, sample_period=1, bias=True):
         self.D_in = num_features
         self.D_out = num_actions
         self.bias = bias
         self.rho = rho
+        self.sample_period = sample_period
 
         self.head = Variational_Linear_Layer(num_features, num_actions, rho, bias=self.bias)
         self.layers = [self.head]
@@ -59,6 +80,9 @@ class Linear_BBQN():
 
     def variational(self):
         return True
+
+    def count_based(self):
+        return False
 
     def save_target(self):
         self.target = self.head.make_target()
